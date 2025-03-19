@@ -1,0 +1,87 @@
+version: '3'
+
+tasks:
+  example_advanced_build:
+    cmds:
+      - |
+        # Step 1: Determinate the required values
+        PACKAGE="github.com/g4j4/sensed"
+        VERSION="$(git describe --tags --always --abbrev=0 --match='v[0-9]*.[0-9]*.[0-9]*' 2> /dev/null | sed 's/^.//')"
+        COMMIT_HASH="$(git rev-parse --short HEAD)"
+        BUILD_TIMESTAMP=$(date '+%Y-%m-%dT%H:%M:%S')
+
+
+        # Step 2: Build the ldflags
+        LDFLAGS=(
+          "-X '${PACKAGE}/version.Version=${VERSION}'"
+          "-X '${PACKAGE}/version.CommitHash=${COMMIT_HASH}'"
+          "-X '${PACKAGE}/version.BuildTime=${BUILD_TIMESTAMP}'"
+        )
+
+
+        # Step 3: Actual Go build process
+        go build -ldflags="${LDFLAGS[*]}" -o ./_build/sensed ./cmd/sensed
+
+  cleanup:
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - rm -rf ./_build
+      - rm -f test_coverage.out
+      - go mod tidy
+
+  test:
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - go test -v ./...
+
+  test:coverage:
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - go test -v -cover ./... -coverprofile=test_coverage.out
+      - go tool cover -html=test_coverage.out
+
+  vet:
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - go vet ./...
+
+  # see `golangci-lint help linters` to see all linters
+  # Pass -E/--enable to enable linter and -D/--disable to disable:
+  # `golangci-lint run --disable-all -E errcheck`
+  lint:
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - golangci-lint run ./...
+    
+  # installing development & ci dependencies
+  install:deps:
+    dir: '{{.TASKFILE_DIR}}'
+    cmds:
+      - go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.6
+
+  build:target:
+    dir: '{{.TASKFILE_DIR}}'
+    vars:
+      TARGET_ARCH: '{{.TARGET_ARCH| default "arm64"}}'
+      FLAGS:  '{{.FLAGS| default ""}}'
+    cmds:
+      #- task: cleanup
+      - go mod tidy
+      - echo "Building for {{.TARGET_ARCH}}"
+      - mkdir -p ./_build/{{.TARGET_ARCH}}
+      # go build -ldflags="-X 'sensed.Version=v1.0.0'"
+      - GOOS=linux GOARCH={{.TARGET_ARCH}} go build {{if .FLAGS}}{{.FLAGS}} {{end}}-o ./_build/{{.TARGET_ARCH}}/sensed ./cmd/sensed
+
+  build:arm64:
+    cmds:
+      - task: build:target
+        vars:
+          TARGET_ARCH: arm64
+          FLAGS: "-trimpath"
+
+  build:amd64:
+    cmds:
+      - task: build:target
+        vars:
+          TARGET_ARCH: amd64
+          FLAGS: "-trimpath"
